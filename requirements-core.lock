@@ -1,0 +1,19 @@
+# Exact core runtime versions verified in the local environment.
+annotated-types==0.8.0
+anyio==4.15.1
+click==8.5.0
+et_xmlfile==2.0.0
+fastapi==0.115.11
+h11==0.16.0
+idna==3.20
+numpy==2.2.3
+openpyxl==3.1.5
+pillow==11.1.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+pydicom==3.0.1
+python-multipart==0.0.20
+starlette==0.46.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.34.0

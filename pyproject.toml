@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kosti"
+version = "0.1.0"
+description = "Offline DXA quality assessment with auditable per-image results"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy==2.2.3",
+  "pydicom==3.0.1",
+  "Pillow==11.1.0",
+  "openpyxl==3.1.5",
+  "fastapi==0.115.11",
+  "uvicorn==0.34.0",
+  "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.5", "httpx==0.28.1"]
+ml = ["torch==2.6.0", "torchvision==0.21.0"]
+
+[project.scripts]
+kosti = "kosti.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
