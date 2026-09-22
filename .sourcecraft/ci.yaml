@@ -1,0 +1,41 @@
+# CI/CD SourceCraft для проекта Kosti (контроль качества DXA).
+# Справочник: https://sourcecraft.dev/portal/docs/ru/sourcecraft/concepts/ci-cd
+#
+# Триггеры: push в любую ветку и предложения изменений (pull request).
+# Задачи выполняются параллельно на облачных воркерах.
+
+on:
+  push:
+    - workflows: [ci]
+  pull_request:
+    - workflows: [ci]
+
+workflows:
+  ci:
+    tasks:
+      # Полный прогон тестов: 75 тестов, включая сквозной путь
+      # DICOM -> PyTorch -> API -> CSV. Тесты, требующие torch, не пропускаются.
+      - name: tests
+        cubes:
+          - name: pytest
+            image: python:3.11.11-slim-bookworm
+            script:
+              - python -m pip install --upgrade pip
+              - python -m pip install -r requirements-test.lock
+              - python -m pip install --no-deps .
+              - python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+              - python -m pytest -q
+
+      # Проверка, что контейнер собирается из Dockerfile (образ не публикуется).
+      - name: docker-build
+        cubes:
+          - name: setup-buildx
+            action: docker/setup-buildx-action@v3
+          - name: build
+            action: docker/build-push-action@v6
+            with:
+              context: .
+              file: Dockerfile
+              platforms: linux/amd64
+              push: false
+              tags: kosti:ci
