@@ -29,6 +29,16 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("manifest", type=Path)
     evaluate.add_argument("--predictions", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
+    configure = sub.add_parser("training-config", help="Create an offline training configuration; no training")
+    configure.add_argument("manifest", type=Path)
+    configure.add_argument("--data-root", type=Path, required=True)
+    configure.add_argument("--initial-weights", type=Path, required=True)
+    configure.add_argument("--output", type=Path, required=True, help="Future run directory")
+    configure.add_argument("--config", type=Path, required=True, help="New configuration JSON")
+    configure.add_argument("--mode", choices=("cross_validation", "final"), default="cross_validation")
+    train = sub.add_parser("train", help="Validate training inputs; optimization requires --execute")
+    train.add_argument("--config", type=Path, required=True)
+    train.add_argument("--execute", action="store_true", help="Actually optimize models; omitted by default")
     batch = sub.add_parser("batch", help="Run an explicit trained quality model offline")
     batch.add_argument("input", type=Path)
     batch.add_argument("--model", type=Path, required=True, help="Quality bundle manifest JSON")
@@ -60,6 +70,17 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 evaluate_predictions(args.manifest, args.predictions, args.output)
             print(f"Written to {args.output}; no training performed")
+            return 0
+
+        if args.command == "training-config":
+            from kosti.training import create_config
+            create_config(args.manifest, args.data_root, args.initial_weights, args.output, args.config, args.mode)
+            print(f"Configuration written to {args.config}; no training performed")
+            return 0
+
+        if args.command == "train":
+            from kosti.training import run_training
+            print(json.dumps(run_training(args.config, execute=args.execute), ensure_ascii=False, indent=2))
             return 0
 
         from kosti.ml import load_quality_predictor

@@ -112,3 +112,7 @@ KOSTI_MODELS_DIR=/absolute/path/to/quality sh scripts/run.sh
 Команды `kosti annotation-template`, `kosti prepare-folds` и `kosti evaluate`
 создают шаблон ручной разметки, фиксируют групповые фолды и оценивают готовые
 вероятности. Подробный порядок и формат файлов: [docs/PREPARATION.md](docs/PREPARATION.md).
+
+Скрипт ResNet18 baseline: `kosti training-config` и `kosti train`.
+По умолчанию выполняется только проверка; обучение требует `--execute`.
+Конфигурация, локальные веса и протокол: [docs/TRAINING.md](docs/TRAINING.md).
