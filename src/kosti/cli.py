@@ -16,6 +16,19 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("input", type=Path)
     audit.add_argument("--labels", type=Path)
     audit.add_argument("--output", type=Path, required=True)
+    template = sub.add_parser("annotation-template", help="Create blank review CSV from an audit; no inferred labels")
+    template.add_argument("audit", type=Path)
+    template.add_argument("--output", type=Path, required=True)
+    folds = sub.add_parser("prepare-folds", help="Validate reviewed labels and freeze grouped folds; no training")
+    folds.add_argument("audit", type=Path)
+    folds.add_argument("--annotations", type=Path, required=True)
+    folds.add_argument("--output", type=Path, required=True)
+    folds.add_argument("--n-splits", type=int, default=3)
+    folds.add_argument("--seed", type=int, default=42)
+    evaluate = sub.add_parser("evaluate", help="Evaluate existing held-out probabilities; no training")
+    evaluate.add_argument("manifest", type=Path)
+    evaluate.add_argument("--predictions", type=Path, required=True)
+    evaluate.add_argument("--output", type=Path, required=True)
     batch = sub.add_parser("batch", help="Run an explicit trained quality model offline")
     batch.add_argument("input", type=Path)
     batch.add_argument("--model", type=Path, required=True, help="Quality bundle manifest JSON")
@@ -36,6 +49,17 @@ def main(argv: list[str] | None = None) -> int:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"Audit written to {args.output}")
+            return 0
+
+        if args.command in ("annotation-template", "prepare-folds", "evaluate"):
+            from kosti.preparation import annotation_template, prepare_folds, evaluate_predictions
+            if args.command == "annotation-template":
+                annotation_template(args.audit, args.output)
+            elif args.command == "prepare-folds":
+                prepare_folds(args.audit, args.annotations, args.output, args.n_splits, args.seed)
+            else:
+                evaluate_predictions(args.manifest, args.predictions, args.output)
+            print(f"Written to {args.output}; no training performed")
             return 0
 
         from kosti.ml import load_quality_predictor
