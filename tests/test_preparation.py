@@ -112,6 +112,44 @@ def test_evaluate_known_labels_only(tmp_path):
     assert metrics['hip_roi']['n'] == 0
     assert metrics['hip_roi']['f1'] is None
     assert metrics['spine_axis']['n'] == 0
+    assert result['quality_by_region']['all']['quality_class_or']['f1'] == 1
+    assert result['quality_by_region']['spine']['quality_head']['roc_auc'] is None
+    assert result['bootstrap']['repeats'] == 0
+
+
+def test_report_quality_or_rule_and_grouped_intervals(tmp_path):
+    manifest, path, rows = predictions(tmp_path)
+    prepared = json.loads(manifest.read_text())
+    negative = next(s for s in prepared['samples'] if s['pixel_hash'] == 'z')
+    for key in ('spine_position', 'spine_artifact', 'spine_quality'):
+        negative['labels'][key] = 0
+    manifest.write_text(json.dumps(prepared))
+    for row in rows:
+        if row['pixel_hash'] == 'z':
+            row['spine_quality'] = '0.1'
+            # Violation heads still trigger OR, producing a false positive.
+    save(path, rows, ('pixel_hash', 'fold', *LABELS))
+    result = evaluate_predictions(manifest, path, tmp_path / 'report.json', bootstrap_repeats=80, seed=7)
+    quality = result['quality_by_region']['all']
+    assert quality['quality_head']['roc_auc'] == 1
+    assert quality['quality_class_or']['fp'] == 1
+    assert quality['quality_class_or']['f1'] < 1
+    assert quality['independent_groups'] == 3
+    interval = quality['confidence_intervals_95']['quality_head_roc_auc']
+    assert interval['repeats'] == 80
+    assert 0 < interval['valid_resamples'] < 80
+    assert result['label_confidence_intervals_95']['spine_position']['roc_auc']['valid_resamples'] < 80
+
+
+def test_evaluation_rejects_linked_studies_split_across_folds(tmp_path):
+    manifest, path, _ = predictions(tmp_path)
+    prepared = json.loads(manifest.read_text())
+    first = prepared['samples'][0]
+    second = next(s for s in prepared['samples'] if s['fold'] != first['fold'])
+    second['copies'].append({**second['copies'][0], 'path': 'linked-copy.dcm', 'study_uid': first['study_uid']})
+    manifest.write_text(json.dumps(prepared))
+    with pytest.raises(ValueError, match='span multiple folds'):
+        evaluate_predictions(manifest, path, tmp_path / 'report.json')
 
 
 @pytest.mark.parametrize('change,match', [('fold', 'fold'), ('missing', 'exactly'), ('duplicate', 'Duplicate'),

@@ -116,3 +116,8 @@ KOSTI_MODELS_DIR=/absolute/path/to/quality sh scripts/run.sh
 Скрипт ResNet18 baseline: `kosti training-config` и `kosti train`.
 По умолчанию выполняется только проверка; обучение требует `--execute`.
 Конфигурация, локальные веса и протокол: [docs/TRAINING.md](docs/TRAINING.md).
+
+Локальная галерея ручной разметки: `kosti review-gallery`; инструкция в
+[docs/PREPARATION.md](docs/PREPARATION.md). Для подготовленного приватного
+запуска на Kaggle после проверки меток и изображений см.
+[docs/KAGGLE.md](docs/KAGGLE.md). Ключ Kaggle и данные не коммитятся.

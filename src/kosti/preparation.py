@@ -5,7 +5,7 @@ import csv
 import json
 from pathlib import Path, PurePosixPath
 
-from .evaluation import grouped_folds, multilabel_metrics
+from .evaluation import binary_metrics, grouped_bootstrap_ci, grouped_folds, linked_study_groups, multilabel_metrics
 
 LABELS = ('spine_position', 'spine_axis', 'spine_artifact',
           'hip_position', 'hip_roi', 'spine_quality', 'hip_quality')
@@ -123,14 +123,22 @@ def prepare_folds(audit_path, annotations_path, output, n_splits=3, seed=42):
     return result
 
 
-def evaluate_predictions(manifest_path, predictions_path, output):
+def evaluate_predictions(manifest_path, predictions_path, output, bootstrap_repeats=0, seed=42):
     """Evaluate supplied held-out probabilities, never fit thresholds on OOF labels."""
+    if type(bootstrap_repeats) is not int or not 0 <= bootstrap_repeats <= 10000:
+        raise ValueError('bootstrap_repeats must be an integer in [0, 10000]')
+    if type(seed) is not int or seed < 0:
+        raise ValueError('bootstrap seed must be a nonnegative integer')
     manifest = read_json(manifest_path)
     if manifest.get('schema_version') != 1 or manifest.get('label_names') != list(LABELS):
         raise ValueError('Unsupported prepared manifest')
     samples = manifest.get('samples', [])
     if not samples or len({s['pixel_hash'] for s in samples}) != len(samples):
         raise ValueError('Manifest must have unique nonempty samples')
+    for sample in samples:
+        representative = {key: sample[key] for key in IDENTITY}
+        if representative not in sample.get('copies', []):
+            raise ValueError('Duplicate provenance must include its representative image')
     predictions = {}
     with Path(predictions_path).open(encoding='utf-8-sig', newline='') as stream:
         reader = csv.DictReader(stream)
@@ -152,10 +160,63 @@ def evaluate_predictions(manifest_path, predictions_path, output):
             raise ValueError('Prediction fold differs from frozen split')
         targets.append([float('nan') if sample['labels'][k] is None else sample['labels'][k] for k in LABELS])
         probabilities.append([float(row[k]) for k in LABELS])
+    groups = linked_study_groups(samples)
+    group_folds = {}
+    for sample, group in zip(samples, groups):
+        previous_fold = group_folds.setdefault(group, sample['fold'])
+        if previous_fold != sample['fold']:
+            raise ValueError('Linked studies or exact copies span multiple folds')
+
+    def interval(y, p, unit_groups, metric, offset):
+        if bootstrap_repeats == 0:
+            return None
+        return grouped_bootstrap_ci(y, p, unit_groups, metric=metric,
+                                    repeats=bootstrap_repeats, seed=seed + offset)
+
+    # The binary result exported by the API is OR over applicable violation heads.
+    # The separate quality head supplies the risk score used for ROC AUC.
+    quality = {}
+    for region in ('spine', 'hip', 'all'):
+        indices = [i for i, sample in enumerate(samples) if region == 'all' or sample['region'] == region]
+        if not indices:
+            continue
+        known, head_scores, or_decisions, region_groups = [], [], [], []
+        for i in indices:
+            sample = samples[i]
+            actual = sample['labels'][sample['region'] + '_quality']
+            if actual is None:
+                continue
+            row = predictions[sample['pixel_hash']]
+            applicable = ('spine_position', 'spine_axis', 'spine_artifact') if sample['region'] == 'spine' else ('hip_position', 'hip_roi')
+            known.append(actual)
+            head_scores.append(float(row[sample['region'] + '_quality']))
+            or_decisions.append(int(any(float(row[name]) >= 0.5 for name in applicable)))
+            region_groups.append(groups[i])
+        if not known:
+            continue
+        quality[region] = {
+            'quality_head': binary_metrics(known, head_scores),
+            'quality_class_or': binary_metrics(known, or_decisions),
+            'independent_groups': len(set(region_groups)),
+        }
+        if bootstrap_repeats:
+            quality[region]['confidence_intervals_95'] = {
+                'quality_head_roc_auc': interval(known, head_scores, region_groups, 'roc_auc', 100 + len(quality)),
+                'quality_class_or_f1': interval(known, or_decisions, region_groups, 'f1', 200 + len(quality)),
+            }
+
     report = {'schema_version': 1, 'threshold': 0.5,
               'metrics': multilabel_metrics(targets, probabilities, LABELS),
               'violations': multilabel_metrics([r[:5] for r in targets], [r[:5] for r in probabilities], LABELS[:5]),
+              'quality_by_region': quality,
+              'bootstrap': {'repeats': bootstrap_repeats, 'seed': seed, 'unit': 'linked studies and exact pixel copies'},
               'warnings': ['Fold IDs are checked; this cannot prove the model did not train on held-out images.',
                            'Threshold is fixed at 0.5; no calibration is performed.']}
+    if bootstrap_repeats:
+        report['label_confidence_intervals_95'] = {
+            name: {'f1': interval([row[i] for row in targets], [row[i] for row in probabilities], groups, 'f1', 300 + i),
+                   'roc_auc': interval([row[i] for row in targets], [row[i] for row in probabilities], groups, 'roc_auc', 400 + i)}
+            for i, name in enumerate(LABELS)
+        }
     write_json(output, report)
     return report

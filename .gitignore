@@ -19,3 +19,4 @@ outputs/
 !.env.example
 
 classifaer_learning.ipynb
+kaggle.json

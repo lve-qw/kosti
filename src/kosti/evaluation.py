@@ -120,6 +120,35 @@ def grouped_bootstrap_ci(y_true, probability, groups, metric="f1", threshold=0.5
     return {"lower": interval[0], "upper": interval[1], "valid_resamples": len(scores), "repeats": repeats}
 
 
+def linked_study_groups(samples):
+    """One resampling unit for studies connected by duplicate pixel arrays."""
+    if not samples:
+        raise ValueError("Nonempty prepared samples required")
+    parent = list(range(len(samples)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    by_study, by_hash = {}, {}
+    for index, sample in enumerate(samples):
+        copies = sample.get("copies")
+        if not isinstance(copies, list) or not copies:
+            raise ValueError("Each sample needs nonempty duplicate provenance")
+        for copy in copies:
+            study, pixel_hash = copy.get("study_uid"), copy.get("pixel_hash")
+            if not isinstance(study, str) or not study or not isinstance(pixel_hash, str) or not pixel_hash:
+                raise ValueError("Missing study/hash in duplicate provenance")
+            for seen, value in ((by_study, study), (by_hash, pixel_hash)):
+                if value in seen:
+                    parent[find(index)] = find(seen[value])
+                else:
+                    seen[value] = index
+    return [str(find(index)) for index in range(len(samples))]
+
+
 def masked_bce_with_logits(logits, targets):
     """Torch loss; NaN targets are ignored, including region-inapplicable labels."""
     import torch

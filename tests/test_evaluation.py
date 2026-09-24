@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from kosti.evaluation import grouped_folds, binary_metrics, multilabel_metrics, grouped_bootstrap_ci, masked_bce_with_logits
+from kosti.evaluation import grouped_folds, binary_metrics, multilabel_metrics, grouped_bootstrap_ci, linked_study_groups, masked_bce_with_logits
 
 
 def test_transitive_duplicates_keep_studies_together():
@@ -60,3 +60,15 @@ def test_average_precision_groups_ties_and_balanced_accuracy():
 def test_bootstrap_rejects_missing_groups():
     with pytest.raises(ValueError):
         grouped_bootstrap_ci([0, 1], [.1, .9], ["a", ""], repeats=10)
+
+
+def test_bootstrap_groups_connect_studies_through_exact_copies():
+    samples = [
+        {'copies': [{'study_uid': 'a', 'pixel_hash': 'x'}, {'study_uid': 'b', 'pixel_hash': 'x'}]},
+        {'copies': [{'study_uid': 'b', 'pixel_hash': 'y'}]},
+        {'copies': [{'study_uid': 'c', 'pixel_hash': 'z'}]},
+    ]
+    groups = linked_study_groups(samples)
+    assert groups[0] == groups[1] != groups[2]
+    with pytest.raises(ValueError, match='duplicate provenance'):
+        linked_study_groups([{'copies': []}])

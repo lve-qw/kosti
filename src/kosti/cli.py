@@ -19,6 +19,10 @@ def parser() -> argparse.ArgumentParser:
     template = sub.add_parser("annotation-template", help="Create blank review CSV from an audit; no inferred labels")
     template.add_argument("audit", type=Path)
     template.add_argument("--output", type=Path, required=True)
+    gallery = sub.add_parser("review-gallery", help="Render offline image review page from a DICOM audit")
+    gallery.add_argument("audit", type=Path)
+    gallery.add_argument("--data-root", type=Path, required=True)
+    gallery.add_argument("--output", type=Path, required=True, help="New gallery directory")
     folds = sub.add_parser("prepare-folds", help="Validate reviewed labels and freeze grouped folds; no training")
     folds.add_argument("audit", type=Path)
     folds.add_argument("--annotations", type=Path, required=True)
@@ -29,6 +33,9 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("manifest", type=Path)
     evaluate.add_argument("--predictions", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
+    evaluate.add_argument("--bootstrap-repeats", type=int, default=0,
+                          help="Optional 95%% confidence intervals resampled by linked studies")
+    evaluate.add_argument("--seed", type=int, default=42)
     configure = sub.add_parser("training-config", help="Create an offline training configuration; no training")
     configure.add_argument("manifest", type=Path)
     configure.add_argument("--data-root", type=Path, required=True)
@@ -61,6 +68,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Audit written to {args.output}")
             return 0
 
+        if args.command == "review-gallery":
+            from kosti.review import build_review_gallery
+            print(json.dumps(build_review_gallery(args.audit, args.data_root, args.output), ensure_ascii=False))
+            return 0
+
         if args.command in ("annotation-template", "prepare-folds", "evaluate"):
             from kosti.preparation import annotation_template, prepare_folds, evaluate_predictions
             if args.command == "annotation-template":
@@ -68,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "prepare-folds":
                 prepare_folds(args.audit, args.annotations, args.output, args.n_splits, args.seed)
             else:
-                evaluate_predictions(args.manifest, args.predictions, args.output)
+                evaluate_predictions(args.manifest, args.predictions, args.output,
+                                     args.bootstrap_repeats, args.seed)
             print(f"Written to {args.output}; no training performed")
             return 0
 
