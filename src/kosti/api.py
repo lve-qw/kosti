@@ -1,14 +1,20 @@
-"""Offline, injectable batch API. No quality model means HTTP 503."""
+"""Offline, injectable batch API and local review UI."""
+import base64
+from dataclasses import asdict
+from importlib import resources
 import json
 from pathlib import Path
 import tempfile
 import zipfile
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from .archive import ArchiveLimits, UnsafeArchiveError, safe_extract_zip
+from .contracts import CSV_COLUMNS
+from .dicom import read_dicom
 from .pipeline import process_files, write_csv
+from .preview import thumbnail_png
 
 
 class _BodyLimitMiddleware:
@@ -16,7 +22,7 @@ class _BodyLimitMiddleware:
         self.app, self.max_bytes, self.model_ready = app, max_bytes, model_ready
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("method") != "POST" or scope.get("path") != "/v1/batch":
+        if scope["type"] != "http" or scope.get("method") != "POST" or scope.get("path") not in ("/v1/batch", "/v1/review"):
             return await self.app(scope, receive, send)
         if not self.model_ready:
             return await JSONResponse({"detail": "Quality predictor is not configured"}, status_code=503)(scope, receive, send)
@@ -66,6 +72,22 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
     app = FastAPI(title="Kosti offline DXA quality API")
     app.add_middleware(_BodyLimitMiddleware, max_bytes=max_upload_bytes, model_ready=predictor is not None)
 
+    @app.get("/")
+    def interface():
+        page = resources.files("kosti").joinpath("web", "index.html").read_text(encoding="utf-8")
+        return Response(page, media_type="text/html", headers={
+            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'",
+            "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+        })
+
+    @app.get("/ui/{asset}")
+    def interface_asset(asset: str):
+        if asset not in ("app.js", "style.css"):
+            raise HTTPException(404, "Unknown UI asset")
+        body = resources.files("kosti").joinpath("web", asset).read_bytes()
+        return Response(body, media_type="text/javascript" if asset.endswith(".js") else "text/css",
+                        headers={"Cache-Control": "no-store"})
+
     @app.get("/health")
     def health():
         return {"status": "ok"}
@@ -76,8 +98,7 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
             raise HTTPException(503, "Quality predictor is not configured")
         return {"status": "ready"}
 
-    @app.post("/v1/batch")
-    def batch(files: list[UploadFile] = File(...)):
+    def _prepare_batch(files):
         temporary = None
         try:
             if predictor is None:
@@ -122,16 +143,54 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
             write_csv(rows, csv_path)
             diagnostic_path = root / "diagnostics.json"
             diagnostic_path.write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8")
-            result = root / "results.zip"
-            with zipfile.ZipFile(result, "w", zipfile.ZIP_DEFLATED) as bundle:
-                bundle.write(csv_path, "results.csv")
-                bundle.write(diagnostic_path, "diagnostics.json")
-            response = _TemporaryFileResponse(result, media_type="application/zip", filename="results.zip",
-                                              temporary=temporary)
-            temporary = None  # Response owns cleanup, including after streaming.
-            return response
+            result = temporary, root, paths, rows, diagnostics
+            temporary = None
+            return result
         except (UnsafeArchiveError, zipfile.BadZipFile, NotImplementedError) as exc:
             raise HTTPException(400, str(exc)) from exc
+        finally:
+            if temporary is not None:
+                temporary.cleanup()
+
+    @app.post("/v1/batch")
+    def batch(files: list[UploadFile] = File(...)):
+        temporary = None
+        try:
+            temporary, root, _, _, _ = _prepare_batch(files)
+            result = root / "results.zip"
+            with zipfile.ZipFile(result, "w", zipfile.ZIP_DEFLATED) as bundle:
+                bundle.write(root / "results.csv", "results.csv")
+                bundle.write(root / "diagnostics.json", "diagnostics.json")
+            response = _TemporaryFileResponse(result, media_type="application/zip", filename="results.zip",
+                                              temporary=temporary, headers={"Cache-Control": "no-store"})
+            temporary = None  # Response owns cleanup, including after streaming.
+            return response
+        finally:
+            if temporary is not None:
+                temporary.cleanup()
+            for upload in files:
+                upload.file.close()
+
+    @app.post("/v1/review")
+    def review(files: list[UploadFile] = File(...)):
+        temporary = None
+        try:
+            temporary, root, paths, rows, diagnostics = _prepare_batch(files)
+            previews = {}
+            for index, (path, row) in enumerate(zip(paths, rows)):
+                try:
+                    image = read_dicom(path)
+                    previews[str(index)] = "data:image/png;base64," + base64.b64encode(thumbnail_png(image, max_side=360)).decode("ascii")
+                except ValueError:
+                    # A damaged DICOM still has its own result row and diagnostic.
+                    pass
+            return JSONResponse({
+                "columns": list(CSV_COLUMNS),
+                "rows": [asdict(row) for row in rows],
+                "diagnostics": diagnostics,
+                "previews": previews,
+                "csv": (root / "results.csv").read_text(encoding="utf-8"),
+            }, headers={"Cache-Control": "no-store"})
         finally:
             if temporary is not None:
                 temporary.cleanup()

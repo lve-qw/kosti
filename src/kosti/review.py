@@ -1,26 +1,15 @@
 """Offline image review gallery for explicit, per-image expert annotations."""
 from __future__ import annotations
 
-import io
 import json
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np
-from PIL import Image
 
 from .dicom import read_dicom
 from .preparation import FIELDS, audit_records, read_json
-
-
-def _thumbnail(image, max_side=420):
-    pixels = np.clip(image.pixels * 255, 0, 255).astype(np.uint8)
-    rendered = Image.fromarray(pixels, mode='L')
-    rendered.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
-    result = io.BytesIO()
-    rendered.save(result, format='PNG')
-    return result.getvalue()
+from .preview import thumbnail_png
 
 
 def build_review_gallery(audit_path, data_root, output):
@@ -49,7 +38,7 @@ def build_review_gallery(audit_path, data_root, output):
             if any(getattr(image, key) != copy[key] for key in ('study_uid', 'image_uid', 'pixel_hash')):
                 raise ValueError('DICOM identity changed since audit: ' + copy['path'])
             if position == 0:
-                (output / preview).write_bytes(_thumbnail(image))
+                (output / preview).write_bytes(thumbnail_png(image))
         return {'pixel_hash': copies[0]['pixel_hash'], 'preview': preview,
                 'copies': [{key: row[key] for key in FIELDS[:4]} for row in copies],
                 'study_count': len({r['study_uid'] for r in copies})}

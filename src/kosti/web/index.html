@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Кости — анализ DXA</title>
+  <link rel="stylesheet" href="/ui/style.css">
+  <script defer src="/ui/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">К</span><span>КОСТИ <small>DXA / КОНТРОЛЬ КАЧЕСТВА</small></span></div>
+    <div class="status-group"><span id="model-status" class="status-pill status-loading" role="status">Проверяем модель…</span><button id="retry-ready" class="text-button" type="button">Обновить</button></div>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow">Локальный анализ</p><h1 id="page-title">Проверка снимков DXA</h1><p class="intro-copy">Загрузите DICOM или архив ZIP. Сервис покажет отдельный результат для каждого файла, включая ошибки обработки. Результаты можно выгрузить в CSV.</p></div>
+      <div class="intro-aside"><span>01 / ЗАГРУЗКА</span><span>02 / ПРОСМОТР</span><span>03 / ЭКСПОРТ</span></div>
+    </section>
+    <section class="upload-card" aria-labelledby="upload-title">
+      <div><p class="eyebrow">Данные исследования</p><h2 id="upload-title">Добавить снимки</h2><p>Файлы обрабатываются на этом сервере. После ответа временные файлы удаляются.</p></div>
+      <form id="upload-form">
+        <label id="dropzone" class="dropzone" for="input-files"><span class="upload-symbol" aria-hidden="true">＋</span><strong>Выберите файлы или перетащите их сюда</strong><span>DICOM, ZIP · можно выбрать несколько файлов</span></label>
+        <input id="input-files" name="files" type="file" multiple accept=".dcm,.dicom,.zip,application/dicom,application/zip">
+        <div class="upload-actions"><span id="file-summary">Файлы не выбраны</span><button id="run-button" type="submit" class="primary-button" disabled>Проверить снимки <span aria-hidden="true">↗</span></button></div>
+      </form>
+    </section>
+    <p id="notice" class="notice" role="status" aria-live="polite"></p>
+    <section id="results" class="results hidden" aria-labelledby="results-title">
+      <div class="results-heading"><div><p class="eyebrow">Результаты обработки</p><h2 id="results-title">Снимки и заключения</h2><p id="results-count" class="subdued"></p></div><button id="download-csv" class="secondary-button" type="button">Скачать CSV ↓</button></div>
+      <div class="results-grid"><div class="result-list"><label class="search-label" for="search">Найти файл</label><input id="search" type="search" placeholder="Имя файла или UID"><div id="rows" class="rows" role="list"></div></div><article id="detail" class="detail" aria-live="polite"></article></div>
+    </section>
+  </main>
+  <footer>Результат модели требует проверки специалистом. Техническая ошибка означает, что этот снимок не оценён.</footer>
+</body>
+</html>
