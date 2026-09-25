@@ -133,3 +133,39 @@ def test_real_dicom_end_to_end_with_failed_decode_uid_retention(tmp_path):
     assert [row["processing_status"] for row in rows] == ["Success", "Failure"]
     assert all(row["study_uid"] == "1.2.3" and row["image_uid"] == "1.2.4" for row in rows)
     assert rows[1]["quality_class"] == ""
+
+
+def test_archive_paths_are_clean_and_macos_junk_is_skipped(monkeypatch):
+    def reader(path):
+        return DicomImage(path, np.zeros((2, 2)), "1.2", "1.3", "abc")
+    monkeypatch.setattr(pipeline, "read_dicom", reader)
+    source = io.BytesIO()
+    with zipfile.ZipFile(source, "w") as bundle:
+        bundle.writestr("study/a.dcm", b"good")
+        bundle.writestr("__MACOSX/study/._a.dcm", b"junk")
+        bundle.writestr(".DS_Store", b"junk")
+    with TestClient(create_app(FakePredictor())) as client:
+        response = client.post("/v1/batch", files={"files": ("batch.zip", source.getvalue())})
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as result:
+        rows = list(csv.DictReader(io.StringIO(result.read("results.csv").decode("utf-8-sig"))))
+    assert [row["path_to_study"] for row in rows] == ["study/a.dcm"]
+    assert rows[0]["processing_status"] == "Success"
+
+
+def test_colliding_archive_paths_are_disambiguated(monkeypatch):
+    def reader(path):
+        return DicomImage(path, np.zeros((2, 2)), "1.2", "1.3", "abc")
+    monkeypatch.setattr(pipeline, "read_dicom", reader)
+    def archive():
+        source = io.BytesIO()
+        with zipfile.ZipFile(source, "w") as bundle:
+            bundle.writestr("study/a.dcm", b"good")
+        return source.getvalue()
+    with TestClient(create_app(FakePredictor())) as client:
+        response = client.post("/v1/batch", files=[("files", ("first.zip", archive())),
+                                                   ("files", ("second.zip", archive()))])
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as result:
+        rows = list(csv.DictReader(io.StringIO(result.read("results.csv").decode("utf-8-sig"))))
+    assert [row["path_to_study"] for row in rows] == ["0000/study/a.dcm", "0001/study/a.dcm"]

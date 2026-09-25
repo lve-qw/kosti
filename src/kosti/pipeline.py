@@ -41,18 +41,26 @@ def validate_prediction(prediction: Prediction):
     return region, overall, violations
 
 
-def process_files(paths, predictor, display_root=None):
+def process_files(paths, predictor, display_root=None, display_paths=None):
     """Preserve order and duplicates; failures carry no guessed predictions."""
+    items = list(paths)
+    if display_paths is not None:
+        display_paths = list(display_paths)
+        if len(display_paths) != len(items):
+            raise ValueError("display_paths must align with paths")
     rows, diagnostics = [], []
     root = Path(display_root).resolve() if display_root is not None else None
-    for item in paths:
+    for index, item in enumerate(items):
         path = Path(item)
-        shown = str(path)
-        if root is not None:
-            try:
-                shown = str(path.resolve().relative_to(root))
-            except ValueError:
-                pass
+        if display_paths is not None:
+            shown = str(display_paths[index])
+        else:
+            shown = str(path)
+            if root is not None:
+                try:
+                    shown = str(path.resolve().relative_to(root))
+                except ValueError:
+                    pass
         row = ResultRow(path_to_study=shown)
         started = time.perf_counter()
         try:
