@@ -10,7 +10,7 @@ from .evaluation import binary_metrics, grouped_bootstrap_ci, grouped_folds, lin
 LABELS = ('spine_position', 'spine_axis', 'spine_artifact',
           'hip_position', 'hip_roi', 'spine_quality', 'hip_quality')
 IDENTITY = ('path', 'study_uid', 'image_uid', 'pixel_hash')
-FIELDS = (*IDENTITY, 'region', 'side', 'label_source', 'reviewed', *LABELS)
+FIELDS = (*IDENTITY, 'region', 'side', 'label_source', 'reviewed', 'conflict_reviewed', *LABELS)
 
 
 def read_json(path):
@@ -49,7 +49,7 @@ def annotation_template(audit_path, output):
         writer = csv.DictWriter(stream, fieldnames=FIELDS)
         writer.writeheader()
         for row in records:
-            writer.writerow({**{k: row[k] for k in IDENTITY}, 'reviewed': '0'})
+            writer.writerow({**{k: row[k] for k in IDENTITY}, 'reviewed': '0', 'conflict_reviewed': '0'})
     return len(records)
 
 
@@ -74,6 +74,9 @@ def prepare_folds(audit_path, annotations_path, output, n_splits=3, seed=42):
                 raise ValueError('Annotation identity differs from audit: ' + path)
             if row['reviewed'] != '1' or not row['label_source'].strip():
                 raise ValueError('Every image requires reviewed=1 and label_source: ' + path)
+            if row['conflict_reviewed'] not in ('0', '1'):
+                raise ValueError('conflict_reviewed must be 0 or 1: ' + path)
+            conflict_reviewed = row['conflict_reviewed'] == '1'
             region, side = row['region'], row['side']
             if region not in ('spine', 'hip') or (region == 'spine' and side != '') or (region == 'hip' and side not in ('left', 'right')):
                 raise ValueError('Use spine with empty side, or hip with left/right: ' + path)
@@ -87,11 +90,13 @@ def prepare_folds(audit_path, annotations_path, output, n_splits=3, seed=42):
                     raise ValueError('Inapplicable labels must remain empty: ' + path)
             parts = [labels[k] for k in LABELS if k.startswith(region + '_') and not k.endswith('_quality')]
             quality = labels[region + '_quality']
-            if quality is not None and ((quality == 0 and 1 in parts) or
-                                        (all(v is not None for v in parts) and quality != int(any(parts)))):
+            conflicting = quality is not None and ((quality == 0 and 1 in parts) or
+                                                   (all(v is not None for v in parts) and quality != int(any(parts))))
+            if conflicting and not conflict_reviewed:
                 raise ValueError('Conflicting quality and violation labels require review: ' + path)
             reviewed[path] = {**{k: row[k] for k in IDENTITY}, 'region': region, 'side': side,
-                              'label_source': row['label_source'], 'labels': labels}
+                              'label_source': row['label_source'], 'labels': labels,
+                              'conflict_reviewed': conflict_reviewed}
     if set(reviewed) != set(by_path):
         raise ValueError('Annotations must cover every audited image')
     rows = [reviewed[p] for p in sorted(reviewed)]
@@ -102,7 +107,7 @@ def prepare_folds(audit_path, annotations_path, output, n_splits=3, seed=42):
         row['fold'] = int(fold)
         previous = unique.get(row['pixel_hash'])
         if previous is not None:
-            if any(row[k] != previous[k] for k in ('region', 'side', 'labels')):
+            if any(row[k] != previous[k] for k in ('region', 'side', 'labels', 'conflict_reviewed')):
                 raise ValueError('Duplicate pixels have inconsistent annotations: ' + row['path'])
             previous['copies'].append({k: row[k] for k in IDENTITY})
         else:

@@ -113,6 +113,20 @@ def test_missing_class_blocks_training_partition(run_inputs):
         training.run_training(path)
 
 
+def test_reviewed_conflict_requires_explicit_flag(run_inputs):
+    path, _, manifest = run_inputs
+    sample = next(s for s in manifest['samples'] if s['region'] == 'spine')
+    sample['labels'].update(spine_position=0, spine_axis=0, spine_artifact=0, spine_quality=1)
+    target = path.parent / 'splits.json'
+    target.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='Contradictory'):
+        training.load_manifest(target)
+    sample['conflict_reviewed'] = True
+    target.write_text(json.dumps(manifest))
+    loaded = training.load_manifest(target)
+    assert next(s for s in loaded['samples'] if s['region'] == 'spine')['conflict_reviewed'] is True
+
+
 def test_frozen_backbone_batchnorm_and_bundle_roundtrip(run_inputs, tmp_path):
     torch = pytest.importorskip('torch')
     path, _, manifest = run_inputs

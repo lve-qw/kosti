@@ -79,21 +79,36 @@ from pathlib import Path
 
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'pydicom==3.0.1'])
-input_dir = Path('/kaggle/input/DATASET_SLUG')
-work = Path('/kaggle/working')
-with zipfile.ZipFile(input_dir / 'project.zip') as archive:
-    archive.extractall(work / 'project')
-with zipfile.ZipFile(input_dir / 'images.zip') as archive:
-    archive.extractall(work / 'dicom')
-sys.path.insert(0, str(work / 'project' / 'src'))
+# The dataset mount layout differs between Kaggle images: locate the package by
+# content and support both stored zips and automatically extracted directories.
+package = next((p.parent for p in Path('/kaggle/input').rglob('folds.json')), None)
+if package is None:
+    raise FileNotFoundError('Training package not found under /kaggle/input')
+print('package dir:', package)
+if (package / 'project.zip').is_file() and (package / 'images.zip').is_file():
+    stage = Path('/tmp/kosti-input')
+    stage.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(package / 'project.zip') as archive:
+        archive.extractall(stage / 'project')
+    with zipfile.ZipFile(package / 'images.zip') as archive:
+        archive.extractall(stage / 'images')
+    project_dir, data_root = stage / 'project', stage / 'images'
+else:
+    project_dir, data_root = package / 'project', package / 'images'
+if not (project_dir / 'src').is_dir() or not (data_root / 'images').is_dir():
+    raise FileNotFoundError('Unexpected dataset layout: ' + str(package))
+sys.path.insert(0, str(project_dir / 'src'))
 from kosti.training import create_config, run_training
+work = Path('/kaggle/working')
 config_path = work / 'train.json'
-create_config(input_dir / 'folds.json', work / 'dicom',
-              input_dir / 'imagenet-resnet18.pth', work / 'results', config_path)
+create_config(package / 'folds.json', data_root,
+              package / 'imagenet-resnet18.pth', work / 'results', config_path)
 config = json.loads(config_path.read_text(encoding='utf-8'))
 config['device'] = 'cuda'
 config_path.write_text(json.dumps(config), encoding='utf-8')
-print(run_training(config_path, execute=True))
+summary = run_training(config_path, execute=True)
+print(summary)
+print((work / 'results' / 'metrics.json').read_text(encoding='utf-8'))
 '''.replace('DATASET_SLUG', dataset_slug)
         (kernel_dir / 'runner.py').write_text(runner, encoding='utf-8')
         metadata = {
@@ -150,7 +165,9 @@ def main() -> None:
             if metadata.get('dataset_sources') != [dataset_id] or metadata.get('is_private') is not True:
                 raise ValueError('Kernel metadata does not refer to the private training dataset')
             kaggle_command(args.credential, 'kernels', 'push', '-p', str(args.kernel_dir.resolve()))
-            print(json.dumps({'launched_private_kernel': metadata['id']}))
+            print(json.dumps({'launched_private_kernel': metadata['id'],
+                              'note': 'A first push may register a title-derived slug; verify with '
+                                      'kaggle kernels list --mine -s <slug>'}))
 
 
 if __name__ == '__main__':
