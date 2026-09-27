@@ -23,6 +23,11 @@ def parser() -> argparse.ArgumentParser:
     gallery.add_argument("audit", type=Path)
     gallery.add_argument("--data-root", type=Path, required=True)
     gallery.add_argument("--output", type=Path, required=True, help="New gallery directory")
+    importer = sub.add_parser("import-expert-labels", help="Join supplied Excel scores to a visual image index")
+    importer.add_argument("audit", type=Path)
+    importer.add_argument("--review", type=Path, required=True)
+    importer.add_argument("--data-root", type=Path, required=True)
+    importer.add_argument("--output", type=Path, required=True)
     folds = sub.add_parser("prepare-folds", help="Validate reviewed labels and freeze grouped folds; no training")
     folds.add_argument("audit", type=Path)
     folds.add_argument("--annotations", type=Path, required=True)
@@ -46,6 +51,17 @@ def parser() -> argparse.ArgumentParser:
     train = sub.add_parser("train", help="Validate training inputs; optimization requires --execute")
     train.add_argument("--config", type=Path, required=True)
     train.add_argument("--execute", action="store_true", help="Actually optimize models; omitted by default")
+    bench = sub.add_parser("benchmark", help="Measure CPU inference time and repeatability with a trained model")
+    bench.add_argument("input", type=Path)
+    bench.add_argument("--model", type=Path, required=True)
+    bench.add_argument("--output", type=Path, required=True)
+    bench.add_argument("--repeats", type=int, default=2)
+    validate = sub.add_parser("validate-oof", help="Evaluate held-out models including predicted anatomy")
+    validate.add_argument("manifest", type=Path)
+    validate.add_argument("--run-root", type=Path, required=True)
+    validate.add_argument("--data-root", type=Path, required=True)
+    validate.add_argument("--output", type=Path, required=True)
+    validate.add_argument("--bootstrap-repeats", type=int, default=1000)
     batch = sub.add_parser("batch", help="Run an explicit trained quality model offline")
     batch.add_argument("input", type=Path)
     batch.add_argument("--model", type=Path, required=True, help="Quality bundle manifest JSON")
@@ -73,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(build_review_gallery(args.audit, args.data_root, args.output), ensure_ascii=False))
             return 0
 
+        if args.command == "import-expert-labels":
+            from kosti.label_import import import_expert_labels
+            summary = import_expert_labels(args.audit, args.review, args.data_root, args.output)
+            print(json.dumps({k: v for k, v in summary.items() if k != 'decisions'}, ensure_ascii=False))
+            return 0
+
         if args.command in ("annotation-template", "prepare-folds", "evaluate"):
             from kosti.preparation import annotation_template, prepare_folds, evaluate_predictions
             if args.command == "annotation-template":
@@ -94,6 +116,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "train":
             from kosti.training import run_training
             print(json.dumps(run_training(args.config, execute=args.execute), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "benchmark":
+            from kosti.validation import benchmark
+            report = benchmark(args.model, args.input, args.output, args.repeats)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0 if report['passed_on_this_machine'] else 1
+
+        if args.command == "validate-oof":
+            from kosti.validation import validate_oof_models
+            report = validate_oof_models(args.manifest, args.run_root, args.data_root,
+                                         args.output, args.bootstrap_repeats)
+            print(json.dumps({k: v for k, v in report.items() if k != 'errors'}, ensure_ascii=False, indent=2))
             return 0
 
         from kosti.ml import load_quality_predictor

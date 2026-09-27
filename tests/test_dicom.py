@@ -43,6 +43,23 @@ def test_monochrome_and_spacing(tmp_path):
     assert image.spacing_mm == (0.5, 0.75)
 
 
+@pytest.mark.parametrize('tags', [
+    {'Rows': 65535, 'Columns': 65535},
+    {'Rows': 0},
+    {'Columns': None},
+    {'BitsAllocated': 64},
+])
+def test_rejects_allocation_budget_before_pixel_decode(tmp_path, monkeypatch, tags):
+    from pydicom.dataset import Dataset
+    path = tmp_path / 'oversized.dcm'
+    write_dicom(path, **tags)
+    def forbidden_decode(self):
+        pytest.fail('Pixel decoder must not run for unsafe dimensions')
+    monkeypatch.setattr(Dataset, 'pixel_array', property(forbidden_decode))
+    with pytest.raises(ValueError, match='pixel budget|BitsAllocated'):
+        read_dicom(path)
+
+
 def test_inversion_and_absent_spacing(tmp_path):
     path = tmp_path / 'image.dcm'
     write_dicom(path, PhotometricInterpretation='MONOCHROME1')

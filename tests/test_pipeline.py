@@ -68,3 +68,20 @@ def test_xlsx_strings_are_not_formulas(tmp_path):
     book = load_workbook(target)
     assert book.active["A2"].data_type == "s"
     assert book.active["A2"].value == "=1+1"
+
+
+@pytest.mark.parametrize('text', ['=1+1', '+SUM(1,2)', '-1+2', '@SUM(1,2)',
+                                  '  =1+1', '\t=1+1', '\r=1+1', '\n=1+1'])
+def test_csv_escapes_untrusted_formula_text_without_mutating_results(tmp_path, text):
+    from kosti.contracts import ResultRow
+    row = ResultRow(text, study_uid=text, image_uid=text, quality_class=0, quality_prob=0.25)
+    target = tmp_path / 'out.csv'
+    pipeline.write_csv([row], target)
+    with target.open(encoding='utf-8-sig', newline='') as stream:
+        exported = next(csv.DictReader(stream))
+    assert exported['path_to_study'] == "'" + text
+    assert exported['study_uid'] == "'" + text
+    assert exported['image_uid'] == "'" + text
+    assert exported['quality_class'] == '0'
+    assert exported['quality_prob'] == '0.25'
+    assert row.path_to_study == text

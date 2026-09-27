@@ -56,6 +56,38 @@ def test_unsafe_zip_returns_400():
         assert response.status_code == 400
 
 
+def test_conflicting_zip_returns_400():
+    source = io.BytesIO()
+    with zipfile.ZipFile(source, "w") as bundle:
+        bundle.writestr("a", b"x")
+        bundle.writestr("a/image.dcm", b"x")
+    with TestClient(create_app(FakePredictor())) as client:
+        response = client.post("/v1/batch", files={"files": ("x.zip", source.getvalue())})
+    assert response.status_code == 400
+
+
+def test_oversized_filename_returns_400():
+    with TestClient(create_app(FakePredictor())) as client:
+        response = client.post("/v1/batch", files={"files": ("x" * 256, b"x")})
+    assert response.status_code == 400
+
+
+def test_review_preview_failure_preserves_prediction(monkeypatch):
+    from kosti import api
+    def reader(path):
+        return DicomImage(path, np.zeros((2, 2)), "1.2", "1.3", "abc")
+    def broken_preview(*args, **kwargs):
+        raise RuntimeError("Preview encoder failed")
+    monkeypatch.setattr(pipeline, "read_dicom", reader)
+    monkeypatch.setattr(api, "read_dicom", reader)
+    monkeypatch.setattr(api, "thumbnail_png", broken_preview)
+    with TestClient(create_app(FakePredictor())) as client:
+        response = client.post("/v1/review", files={"files": ("x.dcm", b"x")})
+    assert response.status_code == 200
+    assert response.json()["rows"][0]["processing_status"] == "Success"
+    assert response.json()["previews"] == {}
+
+
 def test_streamed_body_limit_without_content_length():
     import asyncio
     from kosti.api import _BodyLimitMiddleware

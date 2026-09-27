@@ -70,3 +70,14 @@ def test_failed_crc_removes_partial_output(tmp_path):
     with pytest.raises(zipfile.BadZipFile):
         safe_extract_zip(path, tmp_path / "out")
     assert not (tmp_path / "out" / "image").exists()
+
+
+@pytest.mark.parametrize("names", [("a", "a/image.dcm"), ("a/image.dcm", "a")])
+def test_rejects_file_directory_conflicts_before_extracting(tmp_path, names):
+    source = tmp_path / "conflict.zip"
+    with zipfile.ZipFile(source, "w") as bundle:
+        for name in names:
+            bundle.writestr(name, b"data")
+    with pytest.raises(UnsafeArchiveError, match="conflicting"):
+        safe_extract_zip(source, tmp_path / "out")
+    assert not list((tmp_path / "out").rglob("*"))

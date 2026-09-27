@@ -63,8 +63,11 @@ def load_config(path):
     required = {'schema_version', 'manifest', 'data_root', 'output', 'mode', 'seed',
                 'epochs', 'batch_size', 'learning_rate', 'weight_decay', 'device',
                 'freeze_backbone', 'initial_weights', 'initial_weights_sha256', 'preprocessing'}
-    if not isinstance(config, dict) or set(config) != required or config['schema_version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'balance_classes'} != required or config['schema_version'] != 1:
         raise ValueError('Training config must match schema v1 exactly')
+    config.setdefault('balance_classes', False)
+    if type(config['balance_classes']) is not bool:
+        raise ValueError('balance_classes must be boolean')
     if config['mode'] not in ('cross_validation', 'final') or config['device'] not in ('cpu', 'cuda'):
         raise ValueError('Expected cross_validation/final mode and cpu/cuda device')
     for key, minimum in (('seed', 0), ('epochs', 1), ('batch_size', 2)):
@@ -109,7 +112,7 @@ def load_manifest(path):
             raise ValueError('Prepared samples must have unique pixel hashes')
         hashes.add(sample['pixel_hash'])
         region, side = sample.get('region'), sample.get('side')
-        if region not in ('spine', 'hip') or (region == 'spine' and side != '') or (region == 'hip' and side not in ('left', 'right')):
+        if region not in ('spine', 'hip') or (region == 'spine' and side != '') or (region == 'hip' and side not in ('', 'left', 'right')):
             raise ValueError('Invalid reviewed region/side')
         if not isinstance(sample.get('label_source'), str) or not sample['label_source'].strip():
             raise ValueError('Missing reviewed label source')
@@ -233,6 +236,28 @@ def fit_model(model, samples, config):
     import torch
     model.to(config['device'])
     dataset = TrainingDataset(samples, config)
+    pos_weight = None
+    if config.get('balance_classes', False):
+        support = training_support(samples)
+        pos_weight = torch.tensor([(support[k]['observed'] - support[k]['positive']) /
+                                   support[k]['positive'] for k in LABELS],
+                                  dtype=torch.float32, device=config['device'])
+    # With no augmentations and a frozen encoder, features are constant across epochs.
+    # Cache only this partition's features; BatchNorm remains in evaluation mode.
+    cached = None
+    if config['freeze_backbone']:
+        model.eval()
+        encoder = torch.nn.Sequential(*list(model.children())[:-1])
+        cached_features, cached_anatomy, cached_targets = [], [], []
+        with torch.no_grad():
+            for start in range(0, len(dataset), config['batch_size']):
+                items = [dataset[i] for i in range(start, min(start + config['batch_size'], len(dataset)))]
+                images = torch.stack([i[0] for i in items]).to(config['device'])
+                cached_features.append(encoder(images).flatten(1).detach())
+                cached_anatomy.extend(i[1] for i in items)
+                cached_targets.extend(i[2] for i in items)
+        cached = (torch.cat(cached_features), torch.tensor(cached_anatomy, device=config['device']),
+                  torch.stack(cached_targets).to(config['device']))
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                                   lr=config['learning_rate'], weight_decay=config['weight_decay'])
     rng, history = np.random.default_rng(config['seed']), []
@@ -240,13 +265,16 @@ def fit_model(model, samples, config):
         training_mode(model, config['freeze_backbone'])
         loss_sum = 0.
         for indices in batches(len(dataset), config['batch_size'], rng):
-            items = [dataset[i] for i in indices]
-            images = torch.stack([i[0] for i in items]).to(config['device'])
-            anatomy = torch.tensor([i[1] for i in items], device=config['device'])
-            targets = torch.stack([i[2] for i in items]).to(config['device'])
+            if cached is None:
+                items = [dataset[i] for i in indices]
+                images = torch.stack([i[0] for i in items]).to(config['device'])
+                anatomy = torch.tensor([i[1] for i in items], device=config['device'])
+                targets = torch.stack([i[2] for i in items]).to(config['device'])
+            else:
+                anatomy, targets = cached[1][indices], cached[2][indices]
             optimizer.zero_grad(set_to_none=True)
-            logits = model(images)
-            loss = torch.nn.functional.cross_entropy(logits[:, :2], anatomy) + masked_bce_with_logits(logits[:, 2:], targets)
+            logits = model(images) if cached is None else model.fc(cached[0][indices])
+            loss = torch.nn.functional.cross_entropy(logits[:, :2], anatomy) + masked_bce_with_logits(logits[:, 2:], targets, pos_weight)
             if not torch.isfinite(loss):
                 raise ValueError('Non-finite training loss')
             loss.backward()

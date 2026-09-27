@@ -10,6 +10,22 @@ from pydicom.uid import UID
 
 from .contracts import DicomImage
 
+# Bound decompression and subsequent float64 normalization allocations. File/ZIP
+# byte limits alone do not constrain the decoded size of compressed DICOMs.
+MAX_DECODED_PIXELS = 16_000_000
+
+
+def _projection_from_metadata(ds):
+    """Report only an explicit standard view, never infer it from pixels or names.
+
+    ImageOrientationPatient describes the image plane, not the projection beam
+    direction, and therefore cannot safely substitute for ViewPosition.
+    """
+    view = str(getattr(ds, 'ViewPosition', '')).strip().upper()
+    if view in {'AP', 'PA', 'LL', 'RL', 'RLD', 'LLD', 'RLO', 'LLO'}:
+        return view, 'DICOM.ViewPosition'
+    return 'unknown', 'unavailable'
+
 
 def read_dicom(path: str | Path) -> DicomImage:
     """Decode monochrome pixels to float32 [0, 1]; never manufacture UIDs/scale.
@@ -36,11 +52,16 @@ def read_dicom(path: str | Path) -> DicomImage:
             photo = str(getattr(ds, 'PhotometricInterpretation', ''))
             if int(getattr(ds, 'SamplesPerPixel', 1)) != 1 or photo not in ('MONOCHROME1', 'MONOCHROME2'):
                 raise ValueError('Only monochrome DICOM is supported')
+            rows, columns = int(getattr(ds, 'Rows', 0)), int(getattr(ds, 'Columns', 0))
+            if rows <= 0 or columns <= 0 or rows * columns > MAX_DECODED_PIXELS:
+                raise ValueError(f'Decoded image exceeds pixel budget or has invalid dimensions (maximum {MAX_DECODED_PIXELS} pixels)')
+            if int(getattr(ds, 'BitsAllocated', 0)) not in (1, 8, 16, 32):
+                raise ValueError('Unsupported BitsAllocated; expected 1, 8, 16 or 32')
             raw = ds.pixel_array
             if raw.ndim == 3 and raw.shape[0] == 1:
                 raw = raw[0]
-            if raw.ndim != 2 or not raw.size:
-                raise ValueError('Expected a non-empty 2D pixel array')
+            if raw.ndim != 2 or raw.shape != (rows, columns) or raw.size > MAX_DECODED_PIXELS:
+                raise ValueError('Decoded pixel array does not match bounded image dimensions')
             # Hash decoded stored pixels, not display/windowed intensities.
             canonical = np.ascontiguousarray(raw.astype(raw.dtype.newbyteorder('<')))
             digest = sha256(str(raw.shape).encode() + canonical.dtype.str.encode() + canonical.tobytes()).hexdigest()
@@ -77,4 +98,6 @@ def read_dicom(path: str | Path) -> DicomImage:
                 notes.append('DICOM decoder emitted warnings')
     except Exception as exc:
         raise ValueError(f'Cannot decode DICOM: {exc}') from exc
-    return DicomImage(path, pixels.astype(np.float32), study_uid, image_uid, digest, spacing, notes)
+    projection, projection_source = _projection_from_metadata(ds)
+    return DicomImage(path, pixels.astype(np.float32), study_uid, image_uid, digest, spacing, notes,
+                      projection, projection_source)

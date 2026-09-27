@@ -98,6 +98,26 @@ def multilabel_metrics(y_true, probability, names, thresholds=None):
     return {"per_label": per_label, "macro_f1": float(np.mean(f1s)) if f1s else None}
 
 
+def calibration_metrics(y_true, probability, bins=10):
+    """Describe held-out probability calibration; never fit on evaluation data."""
+    if type(bins) is not int or bins < 1:
+        raise ValueError('Positive integer bin count required')
+    y, p = _observed(y_true, probability)
+    if not len(y):
+        return {'n': 0, 'brier_score': None, 'ece': None, 'bins': []}
+    assignments = np.minimum((p * bins).astype(int), bins - 1)
+    rows, ece = [], 0.
+    for index in range(bins):
+        selected = assignments == index
+        count = int(selected.sum())
+        if count:
+            predicted, observed = float(p[selected].mean()), float(y[selected].mean())
+            ece += count / len(y) * abs(predicted - observed)
+            rows.append({'lower': index / bins, 'upper': (index + 1) / bins,
+                         'n': count, 'mean_probability': predicted, 'observed_fraction': observed})
+    return {'n': len(y), 'brier_score': float(np.mean((p - y) ** 2)), 'ece': ece, 'bins': rows}
+
+
 def grouped_bootstrap_ci(y_true, probability, groups, metric="f1", threshold=0.5, repeats=1000, seed=42):
     """Resample whole studies; report how many draws have a defined metric."""
     y, p = np.asarray(y_true, dtype=float), np.asarray(probability, dtype=float)
@@ -149,7 +169,7 @@ def linked_study_groups(samples):
     return [str(find(index)) for index in range(len(samples))]
 
 
-def masked_bce_with_logits(logits, targets):
+def masked_bce_with_logits(logits, targets, pos_weight=None):
     """Torch loss; NaN targets are ignored, including region-inapplicable labels."""
     import torch
     if logits.shape != targets.shape or not torch.isfinite(logits).all() or torch.isinf(targets).any():
@@ -160,4 +180,10 @@ def masked_bce_with_logits(logits, targets):
         raise ValueError("Observed labels must be binary")
     if not mask.any():
         return logits.sum() * 0
+    if pos_weight is not None:
+        if pos_weight.shape != logits.shape[-1:] or not torch.isfinite(pos_weight).all() or (pos_weight <= 0).any():
+            raise ValueError('One positive finite weight per output required')
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            logits, torch.nan_to_num(targets), pos_weight=pos_weight, reduction='none')
+        return loss[mask].mean()
     return torch.nn.functional.binary_cross_entropy_with_logits(logits[mask], observed)

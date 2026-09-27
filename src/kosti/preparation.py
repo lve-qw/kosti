@@ -75,8 +75,8 @@ def prepare_folds(audit_path, annotations_path, output, n_splits=3, seed=42):
             if row['reviewed'] != '1' or not row['label_source'].strip():
                 raise ValueError('Every image requires reviewed=1 and label_source: ' + path)
             region, side = row['region'], row['side']
-            if region not in ('spine', 'hip') or (region == 'spine' and side != '') or (region == 'hip' and side not in ('left', 'right')):
-                raise ValueError('Use spine with empty side, or hip with left/right: ' + path)
+            if region not in ('spine', 'hip') or (region == 'spine' and side != '') or (region == 'hip' and side not in ('', 'left', 'right')):
+                raise ValueError('Use spine with empty side, or hip with left/right/unknown empty side: ' + path)
             labels = {}
             for name in LABELS:
                 value = row[name].strip()

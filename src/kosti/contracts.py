@@ -25,6 +25,8 @@ class DicomImage:
     pixel_hash: str
     spacing_mm: tuple[float, float] | None = None
     warnings: list[str] = field(default_factory=list)
+    projection: str = "unknown"
+    projection_source: str = "unavailable"
 
 @dataclass(frozen=True)
 class Prediction:

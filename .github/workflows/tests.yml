@@ -1,8 +1,14 @@
-name: tests
-on: [push, pull_request]
+name: CI and deploy
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -13,4 +19,24 @@ jobs:
       - run: python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install -r requirements-ml.lock
       - run: python -m pytest -q
-      - run: docker build -t kosti:test .
+      - run: docker build --build-arg INSTALL_ML=1 -t kosti:test .
+  deploy:
+    needs: tests
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/codex/output-contract-foundation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy tested commit
+        env:
+          DEPLOY_KEY: ${{ secrets.KOSTI_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.KOSTI_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/kosti"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/kosti" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/kosti"' EXIT
+          git archive --format=tar.gz "$GITHUB_SHA" | ssh -i "$HOME/.ssh/kosti" -o BatchMode=yes -o StrictHostKeyChecking=yes masha@158.160.203.10 "$GITHUB_SHA"
+          curl --fail --retry 3 --max-time 15 http://158.160.203.10:8000/ready

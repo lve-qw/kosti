@@ -63,6 +63,26 @@ def test_dry_run_does_not_optimize_or_write(run_inputs, monkeypatch, capsys):
     assert not (path.parent / 'run').exists()
 
 
+def test_frozen_training_updates_only_head_and_decodes_once(run_inputs, monkeypatch):
+    import torch
+    path, _, manifest = run_inputs
+    config = training.load_config(path)
+    config['balance_classes'] = True
+    model = training.initialize_model(config, 42)
+    before = {k: v.clone() for k, v in model.state_dict().items()}
+    original = training.image_tensor
+    calls = []
+    def tracked(sample, root, preprocessing):
+        calls.append(sample['pixel_hash'])
+        return original(sample, root, preprocessing)
+    monkeypatch.setattr(training, 'image_tensor', tracked)
+    history = training.fit_model(model, manifest['samples'], config)
+    assert len(history) == config['epochs']
+    assert len(calls) == len(manifest['samples'])
+    assert not torch.equal(before['fc.weight'], model.fc.weight)
+    assert all(torch.equal(before[k], v) for k, v in model.state_dict().items() if not k.startswith('fc.'))
+
+
 @pytest.mark.parametrize('key,value', [('epochs', 0), ('batch_size', 1), ('learning_rate', float('nan')),
     ('seed', True), ('freeze_backbone', 'yes'), ('device', 'mps'), ('mode', 'unknown'),
     ('initial_weights_sha256', '0' * 64)])

@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -25,13 +25,19 @@ SAFE_DICOM_TAGS = {
     'RescaleIntercept', 'WindowCenter', 'WindowWidth', 'PixelSpacing',
     'VOILUTFunction', 'BurnedInAnnotation',
 }
+OFFICIAL_RESNET18_SHA256 = 'f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec'
 
 
-def validate_package(package: Path) -> tuple[str, str]:
+def validate_package(package: Path, *, require_official_weights: bool = False) -> tuple[str, str]:
     required = {'folds.json', 'images.zip', 'project.zip',
                 'imagenet-resnet18.pth', 'dataset-metadata.json'}
     if not package.is_dir() or {p.name for p in package.iterdir()} != required:
-        raise ValueError('Package must contain exactly the four generated input files')
+        raise ValueError('Package must contain exactly the five generated input files')
+    if require_official_weights:
+        with (package / 'imagenet-resnet18.pth').open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if digest != OFFICIAL_RESNET18_SHA256:
+            raise ValueError('Initial weights differ from official torchvision ResNet18 IMAGENET1K_V1')
     metadata = json.loads((package / 'dataset-metadata.json').read_text(encoding='utf-8'))
     if set(metadata) != {'id', 'title', 'licenses'} or metadata['licenses'] != [{'name': 'unknown'}]:
         raise ValueError('Unexpected Kaggle dataset metadata')
@@ -59,7 +65,11 @@ def validate_package(package: Path) -> tuple[str, str]:
             if sample['label_source'] != 'reviewed local annotation':
                 raise ValueError('Package contains original annotation provenance')
     with zipfile.ZipFile(package / 'project.zip') as archive:
-        if 'src/kosti/training.py' not in archive.namelist():
+        files = archive.namelist()
+        if 'src/kosti/training.py' not in files or any(
+            not name.startswith('src/kosti/') or not name.endswith('.py') or '..' in Path(name).parts
+            for name in files
+        ):
             raise ValueError('Current training source is missing from project archive')
     return dataset_id, dataset_id.split('/')[1]
 
@@ -87,13 +97,22 @@ with zipfile.ZipFile(input_dir / 'images.zip') as archive:
     archive.extractall(work / 'dicom')
 sys.path.insert(0, str(work / 'project' / 'src'))
 from kosti.training import create_config, run_training
-config_path = work / 'train.json'
-create_config(input_dir / 'folds.json', work / 'dicom',
-              input_dir / 'imagenet-resnet18.pth', work / 'results', config_path)
-config = json.loads(config_path.read_text(encoding='utf-8'))
-config['device'] = 'cuda'
-config_path.write_text(json.dumps(config), encoding='utf-8')
-print(run_training(config_path, execute=True))
+results = work / 'results'
+results.mkdir(exist_ok=False)
+protocol = {'baseline': 'ResNet18 IMAGENET1K_V1', 'epochs': 10,
+            'batch_size': 16, 'learning_rate': 0.001, 'weight_decay': 0.01,
+            'freeze_backbone': True, 'seed': 42,
+            'cv_is_validation': True, 'final_is_validation': False}
+(results / 'protocol.json').write_text(json.dumps(protocol, indent=2), encoding='utf-8')
+for mode, name in [('cross_validation', 'cv'), ('final', 'final')]:
+    config_path = work / ('train-' + name + '.json')
+    create_config(input_dir / 'folds.json', work / 'dicom',
+                  input_dir / 'imagenet-resnet18.pth', results / name,
+                  config_path, mode=mode)
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['device'] = 'cuda'
+    config_path.write_text(json.dumps(config), encoding='utf-8')
+    print(name, run_training(config_path, execute=True), flush=True)
 '''.replace('DATASET_SLUG', dataset_slug)
         (kernel_dir / 'runner.py').write_text(runner, encoding='utf-8')
         metadata = {
@@ -121,7 +140,10 @@ def kaggle_command(credential: Path, *args: str) -> None:
         shutil.copyfile(credential, target)
         target.chmod(0o600)
         env = {**os.environ, 'KAGGLE_CONFIG_DIR': str(config_dir)}
-        command = [sys.executable, '-m', 'kaggle', *args]
+        cli = os.environ.get('KAGGLE_CLI') or shutil.which('kaggle')
+        if not cli or not Path(cli).is_file():
+            raise RuntimeError('Kaggle CLI executable is unavailable; set KAGGLE_CLI to its absolute path')
+        command = [cli, *args]
         result = subprocess.run(command, env=env, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, check=False)
         if result.returncode:
@@ -141,7 +163,7 @@ def main() -> None:
     else:
         if args.credential is None:
             parser.error('--credential is required for upload and push')
-        dataset_id, _ = validate_package(args.package)
+        dataset_id, _ = validate_package(args.package, require_official_weights=True)
         if args.action == 'upload-dataset':
             kaggle_command(args.credential, 'datasets', 'create', '-t', '-p', str(args.package.resolve()))
             print(json.dumps({'uploaded_private_dataset': dataset_id}))

@@ -64,8 +64,11 @@ def process_files(paths, predictor, display_root=None):
             row.quality_class = int(bool(violations))
             row.violation_type = "; ".join(violations)
             row.processing_status = "Success"
+            diagnostic = {"path_to_study": shown, "projection": image.projection,
+                          "projection_source": image.projection_source}
             if image.warnings:
-                diagnostics.append({"path_to_study": shown, "warnings": list(image.warnings)})
+                diagnostic["warnings"] = list(image.warnings)
+            diagnostics.append(diagnostic)
         except Exception as exc:
             if not row.study_uid or not row.image_uid:
                 # A bad pixel payload need not erase readable DICOM identifiers.
@@ -91,7 +94,15 @@ def write_csv(rows, path):
         writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for row in rows:
-            writer.writerow(asdict(row))
+            values = asdict(row)
+            # CSV quoting does not stop spreadsheet formulas. Preserve original
+            # values in API JSON/XLSX; escape dangerous text only in CSV export.
+            for key, value in values.items():
+                if isinstance(value, str) and value and (
+                    value[0] in '\t\r\n' or value.lstrip().startswith(('=', '+', '-', '@'))
+                ):
+                    values[key] = "'" + value
+            writer.writerow(values)
 
 
 def write_xlsx(rows, path):

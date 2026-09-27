@@ -65,7 +65,7 @@ def test_group_before_dedup_and_preserve_unknowns(tmp_path):
     ({'hip_roi': '0'}, 'Inapplicable'),
     ({'spine_axis': 'maybe'}, 'Labels'),
     ({'spine_quality': '0'}, 'Conflicting'),
-    ({'region': 'hip', 'side': ''}, 'left/right'),
+    ({'region': 'hip', 'side': 'both'}, 'left/right'),
     ({'spine_position': '0'}, 'inconsistent'),
 ])
 def test_invalid_review_blocks_output(tmp_path, changes, match):

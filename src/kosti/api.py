@@ -3,6 +3,7 @@ import base64
 from dataclasses import asdict
 from importlib import resources
 import json
+import os
 from pathlib import Path
 import tempfile
 import zipfile
@@ -115,7 +116,7 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
                 folder = inputs / f"{index:04d}"
                 folder.mkdir()
                 filename = Path((upload.filename or "image.dcm").replace("\\", "/")).name
-                if filename in ("", ".", ".."):
+                if filename in ("", ".", "..") or "\x00" in filename or len(os.fsencode(filename)) > 255:
                     raise HTTPException(400, "Invalid upload filename")
                 target = folder / filename
                 with target.open("xb") as output:
@@ -181,7 +182,7 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
                 try:
                     image = read_dicom(path)
                     previews[str(index)] = "data:image/png;base64," + base64.b64encode(thumbnail_png(image, max_side=360)).decode("ascii")
-                except ValueError:
+                except Exception:
                     # A damaged DICOM still has its own result row and diagnostic.
                     pass
             return JSONResponse({

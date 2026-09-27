@@ -34,6 +34,7 @@ def safe_extract_zip(archive, destination, limits=None):
             if len(members) > limits.max_files:
                 raise UnsafeArchiveError("Archive entry limit exceeded")
             targets = set()
+            file_targets = set()
             for member in members:
                 name = member.filename
                 part = PurePosixPath(name)
@@ -49,6 +50,8 @@ def safe_extract_zip(archive, destination, limits=None):
                 if target in targets or target.exists():
                     raise UnsafeArchiveError("Archive contains duplicate or existing paths")
                 targets.add(target)
+                if not member.is_dir():
+                    file_targets.add(target)
                 if member.flag_bits & 1:
                     raise UnsafeArchiveError("Encrypted archives are unsupported")
                 if member.file_size > limits.max_file_bytes:
@@ -56,6 +59,11 @@ def safe_extract_zip(archive, destination, limits=None):
                 total += member.file_size
                 if total > limits.max_total_bytes:
                     raise UnsafeArchiveError("Archive total size limit exceeded")
+            # Reject file/directory collisions before writing, regardless of
+            # member order (for example a file 'a' alongside 'a/image.dcm').
+            if any(parent in file_targets for target in targets
+                   for parent in target.parents if parent != root):
+                raise UnsafeArchiveError("Archive contains conflicting file and directory paths")
             total = 0
             for member in members:
                 target = root.joinpath(*PurePosixPath(member.filename).parts)
