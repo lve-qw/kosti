@@ -38,7 +38,11 @@ def test_full_batch_success_and_error(monkeypatch):
         rows = list(csv.DictReader(io.StringIO(result.read("results.csv").decode("utf-8-sig"))))
         assert [row["processing_status"] for row in rows] == ["Success", "Failure"]
         assert rows[0]["quality_class"] == "0"
-        assert json.loads(result.read("diagnostics.json"))[0]["error_type"] == "ValueError"
+        diagnostics = json.loads(result.read("diagnostics.json"))
+        errors = [entry for entry in diagnostics if "error_type" in entry]
+        assert len(errors) == 1
+        assert errors[0]["error_type"] == "ValueError"
+        assert diagnostics[0]["projection"] == "unknown"
 
 
 def test_request_body_limit():

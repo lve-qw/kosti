@@ -25,6 +25,8 @@ def test_preserves_duplicates_and_failure(monkeypatch, tmp_path):
     assert rows[0].quality_prob == 0.73
     assert rows[0].violation_type == "; ".join(VIOLATIONS[SPINE][1:])
     assert rows[1].quality_class is None and rows[1].anatomical_region == ""
+    assert len(errors) == 3
+    errors = [entry for entry in errors if "error_type" in entry]
     assert len(errors) == 1
     destination = tmp_path / "out.csv"
     pipeline.write_csv(rows, destination)

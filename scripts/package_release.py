@@ -21,7 +21,7 @@ def package_release(root, model, output):
                  'requirements-core.lock', 'requirements-ml.lock', 'requirements-test.lock'):
         files[name] = (root / name).read_bytes()
     for folder, suffixes in (('src/kosti', {'.py', '.html', '.css', '.js'}),
-                             ('scripts', {'.py', '.sh'}), ('docs', {'.md'}),
+                             ('scripts', {'.py', '.sh'}), ('docs', {'.md', '.pptx'}),
                              ('tests', {'.py'})):
         for path in sorted((root / folder).rglob('*')):
             if path.is_file() and path.suffix in suffixes and '__pycache__' not in path.parts:
