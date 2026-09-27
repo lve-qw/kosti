@@ -128,7 +128,8 @@ def load_manifest(path):
         quality = labels[region + '_quality']
         if quality is not None and ((quality == 0 and 1 in parts) or
                                     (all(v is not None for v in parts) and quality != int(any(parts)))):
-            raise ValueError('Contradictory quality labels')
+            if sample.get('conflict_reviewed') is not True:
+                raise ValueError('Contradictory quality labels')
         copies = sample.get('copies')
         audit_records({'manifest': copies})
         if {k: sample[k] for k in IDENTITY} not in copies:

@@ -55,3 +55,37 @@ python scripts/kaggle_run.py \
 Kernel сначала выполняет трёхфолдовую кросс-валидацию с фиксированными 10 эпохами, затем отдельное обучение `final` на всех проверенных примерах с теми же параметрами. `results/cv/oof.csv` и `results/cv/metrics.json` относятся только к кросс-валидации; `results/final/final/` содержит веса финальной модели, но не независимую оценку её качества. Протокол сохраняется в `results/protocol.json`. Все выходы приватного kernel нужно скачать для локальной проверки.
 
 Команды Kaggle `datasets create`, `datasets status` и `kernels push`, а также поля метаданных сверены с [официальной документацией Kaggle datasets](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets.md) и [kernels](https://github.com/Kaggle/kaggle-cli/blob/main/docs/kernels_metadata.md). Legacy API Credential на этой машине проверен через официальный Kaggle CLI 2.2.4 командой чтения личного списка datasets; запрос завершился успешно. Проверка не публиковала данные и не запускала обучение.
+
+## Первый фактический запуск — 25 сентября 2026
+
+- Приватный датасет `lveshi/private-dxa-training-v1`: 252 уникальных обезличенных
+  DICOM (из 499 файлов), `folds.json`, `project.zip`, `imagenet-resnet18.pth`.
+  Пакет собран `kaggle_prepare.py` с обязательной проверкой пиксельной разметки.
+- Приватное ядро `lveshi/dxa-quality-resnet18-baseline` (GPU T4, интернет только
+  для установки `pydicom==3.0.1`). Первый push зарегистрировал ядро по слагу,
+  произведённому из заголовка, а не из запрошенного `id`; поэтому фактический ref
+  проверяйте через `kaggle kernels list --mine -s dxa`, а не по выводу скрипта.
+- Текущий образ Kaggle монтирует датасет как
+  `/kaggle/input/datasets/<owner>/<slug>/` и **сам распаковывает** загруженные
+  `project.zip` и `images.zip` в каталоги `project/` и `images/`. Runner ищет
+  пакет по `folds.json` и поддерживает оба варианта (zip и распакованный).
+- Прогон завершён: 3 фолда, замороженный backbone, 10 эпох. В `results/` лежат
+  `oof.csv`, `metrics.json`, три fold-bundle и `completed.json`; bundle корректно
+  загружается сервисом через `load_quality_predictor`. Метрики с 95% интервалами
+  и их интерпретация — в [VERIFICATION.md](VERIFICATION.md). Качество близко к
+  случайному: это проверка инфраструктуры обучения, а не клиническая модель.
+- Второе приватное ядро `lveshi/dxa-quality-resnet18-finetune` дообучает весь
+  backbone 12 эпох на тех же фолдах и даёт заметно лучшие метрики (ROC-AUC 0.63,
+  macro-F1 нарушений 0.27); сравнение вариантов — в [VERIFICATION.md](VERIFICATION.md).
+  Ни один из прогонов не является утверждённой финальной моделью.
+- Повторный запуск и получение результатов:
+
+```bash
+python scripts/kaggle_run.py --package artifacts/kaggle-input-v1 \
+  --kernel-dir artifacts/kaggle-kernel-v1 \
+  --kernel-id lveshi/dxa-quality-resnet18-baseline
+# затем upload-dataset и push-kernel с --credential ../kaggle.json
+
+python -m kaggle kernels status lveshi/dxa-quality-resnet18-baseline
+python -m kaggle kernels output lveshi/dxa-quality-resnet18-baseline -p artifacts/kaggle-output
+```

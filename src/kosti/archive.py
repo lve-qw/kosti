@@ -23,6 +23,13 @@ class UnsafeArchiveError(ValueError):
     pass
 
 
+def _is_system_junk(name):
+    """File-manager metadata that is never an input image."""
+    part = PurePosixPath(name)
+    return ("__MACOSX" in part.parts or part.name == ".DS_Store"
+            or part.name == "Thumbs.db" or part.name.startswith("._"))
+
+
 def safe_extract_zip(archive, destination, limits=None):
     limits = limits or ArchiveLimits()
     root = Path(destination).resolve()
@@ -47,6 +54,8 @@ def safe_extract_zip(archive, destination, limits=None):
                 target = root.joinpath(*part.parts)
                 if not target.resolve().is_relative_to(root):
                     raise UnsafeArchiveError("Archive path escapes destination")
+                if _is_system_junk(name):
+                    continue
                 if target in targets or target.exists():
                     raise UnsafeArchiveError("Archive contains duplicate or existing paths")
                 targets.add(target)
@@ -66,6 +75,8 @@ def safe_extract_zip(archive, destination, limits=None):
                 raise UnsafeArchiveError("Archive contains conflicting file and directory paths")
             total = 0
             for member in members:
+                if _is_system_junk(member.filename):
+                    continue
                 target = root.joinpath(*PurePosixPath(member.filename).parts)
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)

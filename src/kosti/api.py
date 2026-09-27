@@ -1,5 +1,6 @@
 """Offline, injectable batch API and local review UI."""
 import base64
+from collections import Counter
 from dataclasses import asdict
 from importlib import resources
 import json
@@ -110,7 +111,7 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
             root = Path(temporary.name)
             inputs = root / "inputs"
             inputs.mkdir()
-            paths, total_uploaded, expanded_total = [], 0, 0
+            paths, displays, origins, total_uploaded, expanded_total = [], [], [], 0, 0
             for index, upload in enumerate(files):
                 # Prefix preserves repeated input filenames without overwrites.
                 folder = inputs / f"{index:04d}"
@@ -126,20 +127,31 @@ def create_app(predictor=None, max_upload_bytes=512 * 1024 * 1024, archive_limit
                             raise HTTPException(413, "Upload size limit exceeded")
                         output.write(chunk)
                 if zipfile.is_zipfile(target) or filename.lower().endswith(".zip"):
-                    extracted = safe_extract_zip(target, folder / "extracted", limits)
+                    extracted_root = (folder / "extracted").resolve()
+                    extracted = safe_extract_zip(target, extracted_root, limits)
                     target.unlink()
-                    paths.extend(extracted)
+                    for path in extracted:
+                        paths.append(path)
+                        displays.append(path.relative_to(extracted_root).as_posix())
+                        origins.append(index)
                     expanded_total += sum(path.stat().st_size for path in extracted)
                 else:
                     if target.stat().st_size > limits.max_file_bytes:
                         raise HTTPException(413, "File size limit exceeded")
                     paths.append(target)
+                    displays.append(filename)
+                    origins.append(index)
                     expanded_total += target.stat().st_size
                 if len(paths) > limits.max_files or expanded_total > limits.max_total_bytes:
                     raise HTTPException(413, "Expanded batch limit exceeded")
             if not paths:
                 raise HTTPException(400, "Batch contains no files")
-            rows, diagnostics = process_files(paths, predictor, display_root=inputs)
+            # Report the path inside an archive (or the uploaded filename); the
+            # per-upload prefix only disambiguates identical paths in one batch.
+            counts = Counter(displays)
+            shown = [display if counts[display] == 1 else f"{order:04d}/{display}"
+                     for display, order in zip(displays, origins)]
+            rows, diagnostics = process_files(paths, predictor, display_paths=shown)
             csv_path = root / "results.csv"
             write_csv(rows, csv_path)
             diagnostic_path = root / "diagnostics.json"

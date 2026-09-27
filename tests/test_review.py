@@ -26,6 +26,7 @@ def test_gallery_has_one_preview_per_unique_image_and_keeps_all_rows(tmp_path):
     assert 'fetch(' not in page and 'http://' not in page and 'https://' not in page
     assert 'annotations.csv' in page and 'pixel-review.csv' in page
     assert 'pixel_reviewed:false' in page
+    assert 'conflict_reviewed:false' in page and 'conflict-reviewed' in page
     with pytest.raises(ValueError, match='must be new'):
         build_review_gallery(audit, root, output)
 

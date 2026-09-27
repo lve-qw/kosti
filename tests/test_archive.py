@@ -81,3 +81,16 @@ def test_rejects_file_directory_conflicts_before_extracting(tmp_path, names):
     with pytest.raises(UnsafeArchiveError, match="conflicting"):
         safe_extract_zip(source, tmp_path / "out")
     assert not list((tmp_path / "out").rglob("*"))
+
+
+def test_filesystem_metadata_entries_are_skipped(tmp_path):
+    path = tmp_path / "input.zip"
+    with zipfile.ZipFile(path, "w") as bundle:
+        bundle.writestr("study/image.dcm", b"data")
+        bundle.writestr("__MACOSX/study/._image.dcm", b"junk")
+        bundle.writestr("._image.dcm", b"junk")
+        bundle.writestr(".DS_Store", b"junk")
+        bundle.writestr("Thumbs.db", b"junk")
+    result = safe_extract_zip(path, tmp_path / "out")
+    assert [entry.name for entry in result] == ["image.dcm"]
+    assert result[0].read_bytes() == b"data"

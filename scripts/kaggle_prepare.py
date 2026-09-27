@@ -132,6 +132,7 @@ def prepare(manifest_path: Path, data_root: Path, pixel_review: Path,
                 'image_uid': checked.image_uid, 'pixel_hash': checked.pixel_hash,
                 'region': sample['region'], 'side': sample['side'],
                 'label_source': 'reviewed local annotation', 'labels': sample['labels'],
+                'conflict_reviewed': sample.get('conflict_reviewed', False),
                 'fold': sample['fold'], 'copies': copies,
             })
         clean = {'schema_version': 1, 'seed': manifest['seed'],

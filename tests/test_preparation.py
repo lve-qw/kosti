@@ -18,7 +18,7 @@ def inputs(tmp_path):
     with annotations.open(newline='') as f:
         rows = list(csv.DictReader(f))
     for row in rows:
-        row.update(region='spine', side='', reviewed='1', label_source='expert-review:row-3',
+        row.update(region='spine', side='', reviewed='1', conflict_reviewed='0', label_source='expert-review:row-3',
                    spine_position='1', spine_axis='', spine_artifact='0', spine_quality='1')
     save(annotations, rows)
     return audit, annotations, rows
@@ -37,7 +37,8 @@ def test_template_is_blank_and_never_overwrites(tmp_path):
     assert annotation_template(audit, blank) == 5
     with blank.open() as f:
         rows = list(csv.DictReader(f))
-    assert all(r['reviewed'] == '0' and r['region'] == '' and all(r[k] == '' for k in LABELS) for r in rows)
+    assert all(r['reviewed'] == '0' and r['conflict_reviewed'] == '0' and r['region'] == ''
+               and all(r[k] == '' for k in LABELS) for r in rows)
     before = annotations.read_bytes()
     with pytest.raises(FileExistsError):
         annotation_template(audit, annotations)
@@ -76,6 +77,23 @@ def test_invalid_review_blocks_output(tmp_path, changes, match):
     with pytest.raises(ValueError, match=match):
         prepare_folds(audit, annotations, output)
     assert not output.exists()
+
+
+def test_reviewed_quality_conflict_is_preserved(tmp_path):
+    audit, annotations, rows = inputs(tmp_path)
+    for row in rows:
+        row.update(spine_position='0', spine_axis='0', spine_artifact='0', spine_quality='1')
+    save(annotations, rows)
+    with pytest.raises(ValueError, match='Conflicting'):
+        prepare_folds(audit, annotations, tmp_path / 'out.json')
+    for row in rows:
+        row['conflict_reviewed'] = '1'
+    save(annotations, rows)
+    result = prepare_folds(audit, annotations, tmp_path / 'folds.json')
+    sample = next(s for s in result['samples'] if s['region'] == 'spine')
+    assert sample['conflict_reviewed'] is True
+    assert sample['labels']['spine_quality'] == 1
+    assert sample['labels']['spine_position'] == 0
 
 
 def test_missing_row_and_failed_audit_block(tmp_path):
