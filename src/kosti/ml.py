@@ -123,6 +123,13 @@ class BundlePredictor:
             raise ValueError("Invalid quality model output")
         region = self.meta["anatomy_classes"][int(logits[0, :2].argmax())]
         probabilities = torch.sigmoid(logits[0, 2:7]).tolist()
+        if region == REGIONS[0]:
+            from .geometry import spine_axis_probability
+            geometry = spine_axis_probability(image.pixels, image.spacing_mm)
+            if geometry is not None:
+                # Equal fixed blend: the CNN captures appearance while the
+                # deterministic branch measures the explicit five-degree rule.
+                probabilities[1] = (probabilities[1] + geometry) / 2
         violations = {name: probabilities[i] for i, (r, name) in enumerate(VIOLATION_LABELS) if r == region}
         thresholds = {name: self.meta["violation_thresholds"][i]
                       for i, (r, name) in enumerate(VIOLATION_LABELS) if r == region}
