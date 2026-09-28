@@ -1,7 +1,7 @@
 FROM python:3.11.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
-ARG INSTALL_ML=0
+ARG INSTALL_ML=1
 COPY pyproject.toml README.md requirements-core.lock requirements-ml.lock ./
 COPY src ./src
 RUN pip install --no-cache-dir -r requirements-core.lock && \

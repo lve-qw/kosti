@@ -51,8 +51,8 @@ python3 -m venv .venv
 ## Docker
 
 ```sh
-KOSTI_INSTALL_ML=1 sh scripts/build.sh
-KOSTI_MODELS_DIR="$PWD/models" sh scripts/run.sh
+sh scripts/build.sh
+sh scripts/run.sh
 ```
 
 Linux/Docker необходимо отдельно проверить на целевой машине.
