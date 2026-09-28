@@ -114,7 +114,8 @@ results = work / 'results'
 results.mkdir(exist_ok=False)
 protocol = {'baseline': 'ResNet18 IMAGENET1K_V1', 'epochs': 10,
             'batch_size': 16, 'learning_rate': 0.001, 'weight_decay': 0.01,
-            'freeze_backbone': True, 'seed': 42,
+            'freeze_backbone': True, 'seed': 42, 'image_size': 448,
+            'balance_classes': True,
             'cv_is_validation': True, 'final_is_validation': False}
 (results / 'protocol.json').write_text(json.dumps(protocol, indent=2), encoding='utf-8')
 for mode, name in [('cross_validation', 'cv'), ('final', 'final')]:

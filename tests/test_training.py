@@ -237,5 +237,6 @@ def test_config_generator_records_local_hash_without_training(run_inputs):
     generated = training.load_config(target)
     assert generated['initial_weights_sha256'] == config['initial_weights_sha256']
     assert generated['freeze_backbone'] is True
-    assert generated['preprocessing']['size'] == 224
+    assert generated['preprocessing']['size'] == 448
+    assert generated['balance_classes'] is True
     assert not (path.parent / 'future').exists()

@@ -47,10 +47,11 @@ def create_config(manifest, data_root, initial_weights, output, config_path, mod
         'data_root': str(Path(data_root).resolve()), 'output': str(Path(output).resolve()),
         'mode': mode, 'seed': 42, 'epochs': 10, 'batch_size': 16,
         'learning_rate': 0.001, 'weight_decay': 0.01, 'device': 'cpu',
-        'freeze_backbone': True, 'initial_weights': str(Path(initial_weights).resolve()),
+        'freeze_backbone': True, 'balance_classes': True,
+        'initial_weights': str(Path(initial_weights).resolve()),
         'initial_weights_sha256': sha256(initial_weights),
         'preprocessing': {'mode': 'minmax_letterbox_rgb', 'interpolation': 'bilinear',
-                          'size': 224, 'padding_value': 0,
+                          'size': 448, 'padding_value': 0,
                           'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]},
     }
     write_json(config_path, config)
