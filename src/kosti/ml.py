@@ -122,12 +122,16 @@ class BundlePredictor:
         if tuple(logits.shape) != (1, 9) or not torch.isfinite(logits).all():
             raise ValueError("Invalid quality model output")
         region = self.meta["anatomy_classes"][int(logits[0, :2].argmax())]
-        region_index = REGIONS.index(region)
         probabilities = torch.sigmoid(logits[0, 2:7]).tolist()
-        quality = float(torch.sigmoid(logits[0, 7 + region_index]))
         violations = {name: probabilities[i] for i, (r, name) in enumerate(VIOLATION_LABELS) if r == region}
         thresholds = {name: self.meta["violation_thresholds"][i]
                       for i, (r, name) in enumerate(VIOLATION_LABELS) if r == region}
+        # The public quality class is the OR of applicable violations. Report
+        # its score from those same probabilities, preventing contradictory
+        # output such as quality_class=1 together with quality_prob < 0.5.
+        # Auxiliary quality logits remain in existing checkpoints for research
+        # evaluation and backward-compatible state dictionaries.
+        quality = max(violations.values())
         return Prediction(region, quality, violations, thresholds)
 
 

@@ -38,6 +38,11 @@ def validate_prediction(prediction: Prediction):
         threshold = _probability(prediction.thresholds.get(label, 0.5), "threshold")
         if probability >= threshold:
             violations.append(label)
+    # At the standard public decision boundary, reject internally conflicting
+    # predictors instead of emitting a misleading CSV row.
+    if all(prediction.thresholds.get(label, 0.5) == 0.5 for label in VIOLATIONS[region]):
+        if bool(violations) != bool(overall >= 0.5):
+            raise ValueError("quality_prob contradicts violation decisions")
     return region, overall, violations
 
 

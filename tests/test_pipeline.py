@@ -8,7 +8,7 @@ from kosti.contracts import CSV_COLUMNS, DicomImage, Prediction, SPINE, VIOLATIO
 
 class FakePredictor:
     def predict(self, image):
-        return Prediction(SPINE, 0.73, dict(zip(VIOLATIONS[SPINE], [0.1, 0.5, 0.8])))
+        return Prediction(SPINE, 0.8, dict(zip(VIOLATIONS[SPINE], [0.1, 0.5, 0.8])))
 
 
 def fake_read(path):
@@ -22,7 +22,7 @@ def test_preserves_duplicates_and_failure(monkeypatch, tmp_path):
     rows, errors = pipeline.process_files([tmp_path / "good", tmp_path / "bad", tmp_path / "good"], FakePredictor(), tmp_path)
     assert [row.processing_status for row in rows] == ["Success", "Failure", "Success"]
     assert rows[0].quality_class == 1
-    assert rows[0].quality_prob == 0.73
+    assert rows[0].quality_prob == 0.8
     assert rows[0].violation_type == "; ".join(VIOLATIONS[SPINE][1:])
     assert rows[1].quality_class is None and rows[1].anatomical_region == ""
     assert len(errors) == 3
@@ -60,6 +60,18 @@ def test_invalid_threshold_is_isolated(monkeypatch):
     assert rows[0].processing_status == "Failure"
     assert rows[0].quality_prob is None
     assert errors[0]["error_type"] == "ValueError"
+
+
+def test_contradictory_overall_probability_is_isolated(monkeypatch):
+    monkeypatch.setattr(pipeline, "read_dicom", fake_read)
+    class Contradictory:
+        def predict(self, image):
+            return Prediction(SPINE, 0.1,
+                              dict(zip(VIOLATIONS[SPINE], [0.1, 0.9, 0.1])))
+    rows, errors = pipeline.process_files([Path("good")], Contradictory())
+    assert rows[0].processing_status == "Failure"
+    assert rows[0].quality_class is None and rows[0].quality_prob is None
+    assert errors[0]["error"] == "quality_prob contradicts violation decisions"
 
 
 def test_xlsx_strings_are_not_formulas(tmp_path):
